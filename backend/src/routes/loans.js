@@ -1,6 +1,10 @@
 const express = require('express');
 const { pool } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { sendEmail } = require('../config/email');
+const { highPaymentAlertTemplate } = require('../templates/emailTemplates');
+
+const HIGH_PAYMENT_THRESHOLD = 30000; // ₹30,000
 
 const router = express.Router();
 router.use(authenticate);
@@ -116,15 +120,80 @@ router.post('/delete-multiple', async (req, res) => {
 router.post('/:loanId/transactions', async (req, res) => {
   try {
     const { amount, payment_date, payment_type } = req.body;
-    // Verify loan exists
-    const loanCheck = await pool.query('SELECT id FROM loans WHERE id = $1', [req.params.loanId]);
+    // Verify loan exists and get customer name
+    const loanCheck = await pool.query('SELECT id, customer_name FROM loans WHERE id = $1', [req.params.loanId]);
     if (loanCheck.rows.length === 0) return res.status(404).json({ error: 'Loan not found' });
 
     const result = await pool.query(
       'INSERT INTO transactions (loan_id, user_id, amount, payment_date, payment_type) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [req.params.loanId, req.user.id, amount, payment_date || new Date().toISOString().split('T')[0], payment_type || null]
     );
-    res.status(201).json(mapTransaction(result.rows[0]));
+
+    const txn = mapTransaction(result.rows[0]);
+    res.status(201).json(txn);
+
+    // ── High-payment alert (fire-and-forget, non-blocking) ──────────────
+    if (Number(amount) >= HIGH_PAYMENT_THRESHOLD) {
+      setImmediate(async () => {
+        try {
+          // Fetch paying user details
+          const userRes = await pool.query(
+            'SELECT email, display_name FROM users WHERE id = $1',
+            [req.user.id]
+          );
+          const payingUser = userRes.rows[0] || {};
+
+          // Fetch all active admin alert email recipients
+          const adminRes = await pool.query(
+            'SELECT email, name FROM admin_alert_emails WHERE is_active = true'
+          );
+
+          if (adminRes.rows.length === 0) {
+            console.warn('⚠️  High payment alert: no admin_alert_emails configured — skipping email.');
+            return;
+          }
+
+          const customerName = loanCheck.rows[0].customer_name;
+          const payDate = payment_date || new Date().toISOString().split('T')[0];
+
+          // Log the alert
+          await pool.query(
+            `INSERT INTO high_payment_alert_log
+               (transaction_id, loan_id, user_id, amount, payment_date, recipients)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              txn.id,
+              req.params.loanId,
+              req.user.id,
+              amount,
+              payDate,
+              adminRes.rows.map(r => r.email),
+            ]
+          );
+
+          // Send individual emails to each admin
+          for (const admin of adminRes.rows) {
+            const html = highPaymentAlertTemplate(
+              admin.name,
+              { displayName: payingUser.display_name, email: payingUser.email },
+              Number(amount),
+              payDate,
+              req.params.loanId,
+              customerName,
+              admin.email
+            );
+            await sendEmail(
+              admin.email,
+              `🚨 High-Value Payment Alert — ₹${Number(amount).toLocaleString('en-IN')} received`,
+              html
+            );
+          }
+          console.log(`✅ High-payment alert sent to ${adminRes.rows.length} admin(s) for ₹${amount}`);
+        } catch (alertErr) {
+          console.error('❌ High-payment alert error:', alertErr.message);
+        }
+      });
+    }
   } catch (err) {
     console.error('Add transaction error:', err);
     res.status(500).json({ error: 'Internal server error' });

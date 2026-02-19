@@ -184,9 +184,73 @@ const notificationEmailTemplate = (displayName, email, title, message) => {
   return baseLayout(content, email);
 };
 
+const highPaymentAlertTemplate = (adminName, paidByUser, amount, paymentDate, loanId, customerName, recipientEmail) => {
+  const formattedAmount = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+  const formattedDate  = new Date(paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const content = `
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="display:inline-block;background-color:#fef3c7;border-radius:50%;padding:16px;margin-bottom:16px;">
+        <span style="font-size:36px;">🚨</span>
+      </div>
+      <h2 style="margin:0;color:#1e293b;font-size:22px;font-weight:700;">High-Value Payment Alert</h2>
+      <p style="margin:6px 0 0;color:#dc2626;font-size:13px;font-weight:600;">⚠️ Immediate Action Required If Unauthorized</p>
+    </div>
+    <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 20px;">
+      Hello <strong style="color:#1e293b;">${adminName || 'Admin'}</strong>,<br>
+      A high-value payment exceeding <strong style="color:#dc2626;">₹30,000</strong> has been recorded in the system.
+    </p>
+    <div style="background:linear-gradient(135deg,#fef9c3,#fef3c7);border:2px solid #f59e0b;border-radius:14px;padding:24px;margin:20px 0;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #fde68a;">
+            <span style="color:#78350f;font-size:12px;text-transform:uppercase;font-weight:600;">💰 Amount Paid</span><br>
+            <strong style="color:#b45309;font-size:26px;">${formattedAmount}</strong>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #fde68a;">
+            <span style="color:#78350f;font-size:12px;text-transform:uppercase;font-weight:600;">👤 Paid By (User)</span><br>
+            <strong style="color:#1e293b;font-size:15px;">${paidByUser.displayName || 'Unknown'}</strong>
+            <span style="color:#64748b;font-size:13px;"> — ${paidByUser.email || ''}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #fde68a;">
+            <span style="color:#78350f;font-size:12px;text-transform:uppercase;font-weight:600;">🧾 Customer (Loan)</span><br>
+            <strong style="color:#1e293b;font-size:15px;">${customerName || 'N/A'}</strong>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #fde68a;">
+            <span style="color:#78350f;font-size:12px;text-transform:uppercase;font-weight:600;">📅 Payment Date</span><br>
+            <strong style="color:#1e293b;font-size:15px;">${formattedDate}</strong>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:10px 0;">
+            <span style="color:#78350f;font-size:12px;text-transform:uppercase;font-weight:600;">🆔 Loan Reference</span><br>
+            <code style="color:#64748b;font-size:12px;">${loanId}</code>
+          </td>
+        </tr>
+      </table>
+    </div>
+    <div style="background-color:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:16px 20px;margin:24px 0;">
+      <p style="margin:0;color:#991b1b;font-size:13px;line-height:1.7;">
+        🔴 <strong>If this payment was NOT authorized:</strong><br>
+        Please take <strong>immediate action</strong> — review the transaction in the system and contact the relevant personnel without delay.
+        Unauthorized high-value transactions must be escalated immediately.
+      </p>
+    </div>
+    <p style="color:#94a3b8;font-size:12px;margin-top:20px;text-align:center;">
+      This is an automated security alert generated on <strong>${new Date().toLocaleString('en-IN')}</strong>.
+    </p>`;
+  return baseLayout(content, recipientEmail);
+};
+
 module.exports = {
   passwordResetTemplate,
   adminPasswordResetTemplate,
   backupEmailTemplate,
   notificationEmailTemplate,
+  highPaymentAlertTemplate,
 };

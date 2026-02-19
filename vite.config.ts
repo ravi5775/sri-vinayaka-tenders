@@ -61,8 +61,6 @@ export default defineConfig(({ mode }) => ({
           'vendor-recharts': ['recharts'],
           // PDF generation (heavy — split out)
           'vendor-pdf': ['jspdf'],
-          // Date utilities
-          'vendor-date': ['date-fns'],
           // Form handling
           'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
           // Tanstack query

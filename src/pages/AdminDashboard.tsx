@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import LoansTable from '../components/LoansTable';
 import SummaryCard from '../components/SummaryCard';
 import LoanTypeSummary from '../components/LoanTypeSummary';
+import DueTodayPanel from '../components/DueTodayPanel';
 import { generateCSV } from '../utils/csvUtils';
 import { Plus, Download, Search, IndianRupee, TrendingUp, TrendingDown } from 'lucide-react';
 import { calculateLoanProfit, calculateAmountPaid, calculateBalance } from '../utils/planCalculations';
@@ -63,6 +64,8 @@ const AdminDashboard: React.FC = () => {
         <SummaryCard icon={IndianRupee} title={t('Total Collected')} value={overallSummary.totalCollected} isCurrency />
         <SummaryCard icon={TrendingDown} title={t('Total Pending')} value={overallSummary.totalPending} isCurrency color="text-destructive" />
       </div>
+
+      <DueTodayPanel />
 
       <div className="glass-card p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-5">

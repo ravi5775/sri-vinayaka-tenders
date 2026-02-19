@@ -5,6 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useToastContext as useToast } from '../contexts/ToastContext';
 import { Loan, LoanType, DurationUnit } from '../types';
 import { ChevronLeft, User, DollarSign, Percent, FileText, Clock } from 'lucide-react';
+import { financeSchema, tenderSchema, interestRateSchema, flattenZodErrors } from '../utils/security';
 
 const LoanForm: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -58,19 +59,33 @@ const LoanForm: React.FC = () => {
 
   const validateForm = (): boolean => {
     setFormError('');
+
+    // Zod schema validation by loan type
+    if (loanType === 'Finance') {
+      const result = financeSchema.safeParse({
+        customerName, phone, loanAmount, givenAmount,
+        interestRate: interestRate ?? 0, durationInMonths: durationInMonths ?? 0, startDate,
+      });
+      if (!result.success) { setFormError(flattenZodErrors(result.error)); return false; }
+    } else if (loanType === 'Tender') {
+      const result = tenderSchema.safeParse({
+        customerName, phone, loanAmount, givenAmount,
+        durationInDays: durationInDays ?? 0, startDate,
+      });
+      if (!result.success) { setFormError(flattenZodErrors(result.error)); return false; }
+    } else if (loanType === 'InterestRate') {
+      const result = interestRateSchema.safeParse({
+        customerName, phone, loanAmount, givenAmount,
+        interestRate: interestRate ?? 0, durationValue: durationValue ?? 0, startDate,
+      });
+      if (!result.success) { setFormError(flattenZodErrors(result.error)); return false; }
+    }
+
     const duplicateLoan = loans.find(
       l => l.customerName.trim().toLowerCase() === customerName.trim().toLowerCase() && (!isEditing || l.id !== id)
     );
     if (duplicateLoan) {
       setFormError('A customer with this name already exists. Please use a different name.');
-      return false;
-    }
-    if (loanType === 'Tender' && givenAmount >= loanAmount) {
-      setFormError('Given amount must be less than the amount to be repaid.');
-      return false;
-    }
-    if ((loanType === 'Finance' || loanType === 'InterestRate') && givenAmount > loanAmount && givenAmount > 0) {
-      setFormError('Given amount cannot be greater than the Loan Amount.');
       return false;
     }
     return true;

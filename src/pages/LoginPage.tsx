@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useLogo } from '../contexts/LogoContext';
-import { Lock, Mail, Loader2, AlertTriangle } from 'lucide-react';
+import { Lock, Mail, Loader2, AlertTriangle, ShieldAlert } from 'lucide-react';
+import {
+  checkLoginAllowed,
+  recordFailedAttempt,
+  clearLoginAttempts,
+  loginSchema,
+  flattenZodErrors,
+} from '../utils/security';
 
 const LoginPage: React.FC = () => {
   const { signIn } = useAuth();
@@ -15,28 +22,60 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionConflict, setShowSessionConflict] = useState(false);
+  const [lockMessage, setLockMessage] = useState<string | null>(null);
+
+  // Refresh lock status every second while locked
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const msg = checkLoginAllowed();
+      setLockMessage(msg);
+    }, 1000);
+    setLockMessage(checkLoginAllowed());
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent, forceLogin = false) => {
     e.preventDefault();
     setError(null);
-    setIsLoading(true);
 
+    // Check brute-force lock
+    const lockErr = checkLoginAllowed();
+    if (lockErr) { setLockMessage(lockErr); return; }
+
+    // Validate inputs with Zod
+    const parsed = loginSchema.safeParse({ email: email.trim(), password });
+    if (!parsed.success) {
+      setError(flattenZodErrors(parsed.error));
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      const result = await signIn(email, password, forceLogin);
+      const result = await signIn(email.trim(), password, forceLogin);
 
       if (result.error) {
         if (result.code === 'SESSION_CONFLICT') {
           setShowSessionConflict(true);
-        } else if (result.error.toLowerCase().includes('invalid login credentials') || result.error.toLowerCase().includes('invalid email or password')) {
-          setError(t('Invalid username or password.'));
+        } else if (
+          result.error.toLowerCase().includes('invalid login credentials') ||
+          result.error.toLowerCase().includes('invalid email or password')
+        ) {
+          const { locked, attemptsLeft } = recordFailedAttempt();
+          if (locked) {
+            setLockMessage(checkLoginAllowed());
+            setError(null);
+          } else {
+            setError(`${t('Invalid username or password.')} ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`);
+          }
         } else {
+          recordFailedAttempt();
           setError(result.error);
         }
       } else {
+        clearLoginAttempts();
         navigate('/');
       }
-    } catch (err) {
-      console.error('Auth error:', err);
+    } catch {
       setError('A critical system error occurred.');
     } finally {
       setIsLoading(false);
@@ -47,16 +86,11 @@ const LoginPage: React.FC = () => {
     setShowSessionConflict(false);
     setError(null);
     setIsLoading(true);
-
     try {
       const result = await signIn(email, password, true);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        navigate('/');
-      }
-    } catch (err) {
-      console.error('Force login error:', err);
+      if (result.error) { setError(result.error); }
+      else { clearLoginAttempts(); navigate('/'); }
+    } catch {
       setError('A critical system error occurred.');
     } finally {
       setIsLoading(false);
@@ -106,14 +140,25 @@ const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            {error && (
+            {/* Brute-force lockout banner */}
+            {lockMessage && (
+              <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-xl border border-destructive/20 flex items-center gap-2 animate-fade-in-fast">
+                <ShieldAlert size={16} className="shrink-0" />
+                <span>{lockMessage}</span>
+              </div>
+            )}
+
+            {error && !lockMessage && (
               <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-xl border border-destructive/20 animate-fade-in-fast">
                 {error}
               </div>
             )}
 
-            <button type="submit" disabled={isLoading}
-              className="w-full flex justify-center py-3 px-4 rounded-xl text-sm font-semibold text-primary-foreground bg-gradient-to-r from-primary to-primary/85 hover:brightness-110 shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]">
+            <button
+              type="submit"
+              disabled={isLoading || !!lockMessage}
+              className="w-full flex justify-center py-3 px-4 rounded-xl text-sm font-semibold text-primary-foreground bg-gradient-to-r from-primary to-primary/85 hover:brightness-110 shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+            >
               {isLoading ? <Loader2 className="animate-spin" size={20} /> : t('Login')}
             </button>
 

@@ -35,84 +35,84 @@ const loadImageAsBase64 = (src: string): Promise<string> =>
 const buildPdf = (doc: jsPDF, loan: Loan, logoDataUri: string | null) => {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const margin = 18;
+  const margin = 12;
   const contentW = pageW - margin * 2;
 
   // ── Header band ────────────────────────────────────────────────────────
   doc.setFillColor(15, 52, 96);
-  doc.rect(0, 0, pageW, 56, 'F');
+  doc.rect(0, 0, pageW, 36, 'F');
 
-  // subtle diagonal accent stripe
+  // accent stripe
   doc.setFillColor(255, 193, 7);
-  doc.rect(0, 52, pageW, 4, 'F');
+  doc.rect(0, 33, pageW, 3, 'F');
 
   // ── Logo ───────────────────────────────────────────────────────────────
   if (logoDataUri) {
     try {
-      doc.addImage(logoDataUri, 'PNG', margin, 9, 26, 26);
+      doc.addImage(logoDataUri, 'PNG', margin, 5, 18, 18);
     } catch (_) { /* ignore */ }
   }
 
   // ── Company name & receipt label ───────────────────────────────────────
-  const textX = logoDataUri ? margin + 32 : pageW / 2;
+  const textX = logoDataUri ? margin + 22 : pageW / 2;
   const textAlign = logoDataUri ? 'left' : 'center';
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text('Sri Vinayaka Tenders', textX, 21, { align: textAlign });
+  doc.text('Sri Vinayaka Tenders', textX, 14, { align: textAlign });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(7.5);
   doc.setTextColor(180, 210, 255);
-  doc.text('Official Loan Receipt', textX, 29, { align: textAlign });
+  doc.text('Official Loan Receipt', textX, 21, { align: textAlign });
 
   // Receipt badge (right side of header)
   doc.setFillColor(255, 255, 255);
-  doc.roundedRect(pageW - margin - 36, 12, 36, 12, 2, 2, 'F');
+  doc.roundedRect(pageW - margin - 30, 8, 30, 9, 2, 2, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(6.5);
   doc.setTextColor(15, 52, 96);
-  doc.text('LOAN RECEIPT', pageW - margin - 18, 20, { align: 'center' });
+  doc.text('LOAN RECEIPT', pageW - margin - 15, 14, { align: 'center' });
 
-  let y = 66;
+  let y = 42;
 
   // ── Info grid ──────────────────────────────────────────────────────────
   doc.setFillColor(245, 248, 255);
-  doc.roundedRect(margin, y - 4, contentW, 36, 3, 3, 'F');
+  doc.roundedRect(margin, y, contentW, 26, 2, 2, 'F');
   doc.setDrawColor(200, 215, 240);
   doc.setLineWidth(0.3);
-  doc.roundedRect(margin, y - 4, contentW, 36, 3, 3, 'S');
+  doc.roundedRect(margin, y, contentW, 26, 2, 2, 'S');
 
   const drawField = (label: string, value: string, x: number, yy: number) => {
-    doc.setFontSize(7);
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(120, 120, 130);
     doc.text(label.toUpperCase(), x, yy);
-    doc.setFontSize(9.5);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(20, 20, 40);
-    doc.text(value, x, yy + 5.5);
+    doc.text(value, x, yy + 4.5);
   };
 
   const half = contentW / 2;
-  const c1 = margin + 4;
-  const c2 = margin + half + 4;
+  const c1 = margin + 3;
+  const c2 = margin + half + 3;
 
-  const shortId = loan.id.length > 20 ? loan.id.substring(0, 20) + '…' : loan.id;
-  drawField('Loan ID', shortId, c1, y + 3);
-  drawField('Issue Date', formatDate(loan.created_at), c2, y + 3);
-  drawField('Customer Name', loan.customerName, c1, y + 17);
-  drawField('Phone', loan.phone || '—', c2, y + 17);
+  const shortId = loan.id.length > 22 ? loan.id.substring(0, 22) + '…' : loan.id;
+  drawField('Loan ID', shortId, c1, y + 5);
+  drawField('Issue Date', formatDate(loan.created_at), c2, y + 5);
+  drawField('Customer Name', loan.customerName, c1, y + 16);
+  drawField('Phone', loan.phone || '—', c2, y + 16);
 
-  y += 42;
+  y += 31;
 
   // ── Summary cards ──────────────────────────────────────────────────────
   const totalAmount = calculateTotalAmount(loan);
   const amountPaid  = calculateAmountPaid(loan.transactions);
   const balance     = calculateBalance(loan);
 
-  const cardW = (contentW - 8) / 3;
+  const cardW = (contentW - 6) / 3;
   const cards: { label: string; value: string; bg: [number,number,number]; fg: [number,number,number] }[] = [
     { label: 'Total Amount', value: formatCurrency(totalAmount), bg: [224, 236, 255], fg: [15, 52, 96] },
     { label: 'Amount Paid',  value: formatCurrency(amountPaid),  bg: [220, 252, 231], fg: [21, 128, 61] },
@@ -120,27 +120,27 @@ const buildPdf = (doc: jsPDF, loan: Loan, logoDataUri: string | null) => {
   ];
 
   cards.forEach((card, i) => {
-    const cx = margin + i * (cardW + 4);
+    const cx = margin + i * (cardW + 3);
     doc.setFillColor(...card.bg);
-    doc.roundedRect(cx, y, cardW, 22, 2, 2, 'F');
-    doc.setFontSize(7);
+    doc.roundedRect(cx, y, cardW, 16, 2, 2, 'F');
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 110);
-    doc.text(card.label.toUpperCase(), cx + cardW / 2, y + 7, { align: 'center' });
-    doc.setFontSize(10.5);
+    doc.text(card.label.toUpperCase(), cx + cardW / 2, y + 5, { align: 'center' });
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...card.fg);
-    doc.text(card.value, cx + cardW / 2, y + 16, { align: 'center' });
+    doc.text(card.value, cx + cardW / 2, y + 12, { align: 'center' });
   });
 
-  y += 30;
+  y += 21;
 
   // ── Loan details row ───────────────────────────────────────────────────
   doc.setFillColor(250, 250, 253);
-  doc.roundedRect(margin, y, contentW, 18, 2, 2, 'F');
+  doc.roundedRect(margin, y, contentW, 14, 2, 2, 'F');
   doc.setDrawColor(220, 220, 232);
   doc.setLineWidth(0.3);
-  doc.roundedRect(margin, y, contentW, 18, 2, 2, 'S');
+  doc.roundedRect(margin, y, contentW, 14, 2, 2, 'S');
 
   const detailItems = [
     { label: 'Loan Type', value: loan.loanType },
@@ -149,18 +149,18 @@ const buildPdf = (doc: jsPDF, loan: Loan, logoDataUri: string | null) => {
   ];
   const dColW = contentW / detailItems.length;
   detailItems.forEach((d, i) => {
-    const dx = margin + 4 + i * dColW;
-    doc.setFontSize(7);
+    const dx = margin + 3 + i * dColW;
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(130, 130, 140);
-    doc.text(d.label.toUpperCase(), dx, y + 6);
-    doc.setFontSize(9.5);
+    doc.text(d.label.toUpperCase(), dx, y + 5);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 30, 40);
-    doc.text(d.value, dx, y + 14);
+    doc.text(d.value, dx, y + 11);
   });
 
-  y += 26;
+  y += 19;
 
   // ── Transaction History ────────────────────────────────────────────────
   doc.setFontSize(11);

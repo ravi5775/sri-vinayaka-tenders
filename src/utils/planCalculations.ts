@@ -33,21 +33,34 @@ export const calculateFinalDueDate = (loan: Loan): Date | null => {
 
 /**
  * SIMPLE INTEREST ONLY — principal NEVER increases due to interest.
- * 
- * Rules:
- *  - interestRate = ₹X per ₹100 per durationUnit period (i.e. rate%)
- *  - Interest per period = currentPrincipal × (rate / 100)
- *  - Principal is reduced ONLY by principal payments (sorted by date)
- *  - Pending interest = total interest accrued across periods − total interest paid
- *  - balance = remainingPrincipal + pendingInterest
+ *
+ * Rate is always entered as MONTHLY rate (₹X per ₹100 per month).
+ * Duration unit controls collection frequency; rate is prorated accordingly:
+ *   - Monthly : interestPerPeriod = principal × (rate / 100)
+ *   - Weekly  : interestPerPeriod = principal × (rate / 100) / 4
+ *   - Daily   : interestPerPeriod = principal × (rate / 100) / 30
+ *
+ * Principal is reduced ONLY by principal payments.
+ * Pending interest = total interest accrued − total interest paid.
+ * Balance = remainingPrincipal + pendingInterest.
  */
+const PERIODS_PER_MONTH: Record<string, number> = {
+  Months: 1,
+  Weeks: 4,
+  Days: 30,
+};
+
 const getInterestRateCalculationDetails = (loan: Loan) => {
   const transactions = loan.transactions
     ? [...loan.transactions].sort((a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime())
     : [];
 
-  const rate = loan.interestRate || 0;
+  const monthlyRate = loan.interestRate || 0;
   const durationUnit = loan.durationUnit || 'Months';
+  const periodsPerMonth = PERIODS_PER_MONTH[durationUnit] ?? 1;
+  // Rate per collection period (always derived from monthly rate)
+  const ratePerPeriod = monthlyRate / periodsPerMonth;
+
   const startDate = new Date(loan.startDate);
   startDate.setHours(0, 0, 0, 0);
   const today = new Date();
@@ -58,19 +71,13 @@ const getInterestRateCalculationDetails = (loan: Loan) => {
   const interestPayments = transactions.filter(tx => tx.payment_type === 'interest' || !tx.payment_type);
 
   const totalPrincipalPaid = principalPayments.reduce((sum, tx) => sum + tx.amount, 0);
-  const remainingPrincipal = Math.max(0, loan.loanAmount - totalPrincipalPaid);
-
-  // Calculate number of complete periods elapsed since start date
-  // We iterate period-by-period, tracking principal reductions at each boundary
-  let periodsElapsed = 0;
-  let totalInterestAccrued = 0;
 
   // Build a timeline of principal payments sorted by date
   const sortedPrincipalPayments = [...principalPayments].sort(
     (a, b) => new Date(a.payment_date).getTime() - new Date(b.payment_date).getTime()
   );
 
-  // Helper: advance a date by one period
+  // Helper: advance a date by one collection period
   const addOnePeriod = (date: Date): Date => {
     const d = new Date(date);
     switch (durationUnit) {
@@ -82,13 +89,16 @@ const getInterestRateCalculationDetails = (loan: Loan) => {
     return d;
   };
 
+  let periodsElapsed = 0;
+  let totalInterestAccrued = 0;
+
   // Walk period by period and accumulate interest on the principal at that time
   let periodStart = new Date(startDate);
   let periodEnd = addOnePeriod(periodStart);
   let runningPrincipal = loan.loanAmount;
 
   while (periodStart < today) {
-    // Apply any principal payments that happened BEFORE this period started
+    // Apply principal payments that fall within this period
     for (const pp of sortedPrincipalPayments) {
       const ppDate = new Date(pp.payment_date);
       ppDate.setHours(0, 0, 0, 0);
@@ -98,12 +108,12 @@ const getInterestRateCalculationDetails = (loan: Loan) => {
     }
 
     if (periodEnd <= today) {
-      // Full period elapsed
-      const interestForPeriod = runningPrincipal * (rate / 100);
+      // Full period elapsed — apply prorated monthly rate
+      const interestForPeriod = runningPrincipal * (ratePerPeriod / 100);
       totalInterestAccrued += interestForPeriod;
       periodsElapsed++;
     }
-    // else: partial period in progress — no interest charged until period completes
+    // Partial period in progress — no interest charged until period completes
 
     periodStart = periodEnd;
     periodEnd = addOnePeriod(periodStart);
@@ -127,15 +137,20 @@ const getInterestRateCalculationDetails = (loan: Loan) => {
 };
 
 /**
- * Returns the interest amount per period for an InterestRate loan,
- * calculated on the CURRENT remaining principal (after principal payments).
+ * Returns the interest amount per collection period for an InterestRate loan.
+ * Rate is always monthly; prorated by duration unit.
+ *   Monthly → rate/100
+ *   Weekly  → rate/100 / 4
+ *   Daily   → rate/100 / 30
  */
 export const getInterestPerPeriod = (loan: Loan): number => {
   if (loan.loanType !== 'InterestRate') return 0;
   const principalPayments = (loan.transactions || []).filter(tx => tx.payment_type === 'principal');
   const totalPrincipalPaid = principalPayments.reduce((sum, tx) => sum + tx.amount, 0);
   const remainingPrincipal = Math.max(0, loan.loanAmount - totalPrincipalPaid);
-  return remainingPrincipal * ((loan.interestRate || 0) / 100);
+  const monthlyRate = loan.interestRate || 0;
+  const periodsPerMonth = PERIODS_PER_MONTH[loan.durationUnit || 'Months'] ?? 1;
+  return remainingPrincipal * (monthlyRate / periodsPerMonth / 100);
 };
 
 export const getPendingInterest = (loan: Loan): number => {

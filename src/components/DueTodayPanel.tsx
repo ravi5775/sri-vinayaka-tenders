@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { CalendarIcon, Users, IndianRupee, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  CalendarIcon, Users, IndianRupee, AlertCircle,
+  CheckCircle2, ChevronLeft, ChevronRight, Clock,
+} from 'lucide-react';
 import { useLoans } from '../contexts/LoanContext';
 import { Loan, LoanType } from '../types';
 import {
@@ -11,14 +14,11 @@ import {
 import { sanitize } from '../utils/sanitizer';
 
 type FilterType = 'All' | LoanType;
+type MainTab = 'due' | 'overdue';
 
-/**
- * Returns true if the selected date is a due/payment date for the given loan.
- *
- * Finance      : same day-of-month as start date, every month (after start month)
- * Tender       : single due date = startDate + durationInDays
- * InterestRate : every period boundary (daily / weekly / monthly) from start
- */
+/* ─────────────────────────────────────────────
+   isDueOn — is this loan due on a specific date?
+───────────────────────────────────────────── */
 const isDueOn = (loan: Loan, date: Date): boolean => {
   if (calculateBalance(loan) <= 0) return false;
 
@@ -61,6 +61,37 @@ const isDueOn = (loan: Loan, date: Date): boolean => {
   return false;
 };
 
+/* ─────────────────────────────────────────────
+   isNotPayingFor3Months — last payment (or start)
+   was ≥ 3 months ago and loan still has balance.
+───────────────────────────────────────────── */
+const getNotPayingMonths = (loan: Loan): number => {
+  if (calculateBalance(loan) <= 0) return 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  let referenceDate: Date;
+  if (loan.transactions && loan.transactions.length > 0) {
+    const lastTxn = [...loan.transactions].sort(
+      (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
+    )[0];
+    referenceDate = new Date(lastTxn.payment_date);
+  } else {
+    referenceDate = new Date(loan.startDate);
+  }
+  referenceDate.setHours(0, 0, 0, 0);
+
+  const monthsDiff =
+    (today.getFullYear() - referenceDate.getFullYear()) * 12 +
+    (today.getMonth() - referenceDate.getMonth());
+
+  return monthsDiff;
+};
+
+/* ─────────────────────────────────────────────
+   Shared constants
+───────────────────────────────────────────── */
 const BADGE_CLS: Record<LoanType, string> = {
   Finance: 'bg-primary/10 text-primary',
   Tender: 'bg-amber-100 text-amber-700',
@@ -73,12 +104,13 @@ const TYPE_LABEL: Record<LoanType, string> = {
   InterestRate: 'Interest Rate',
 };
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_ARR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-/** Tiny inline calendar (no external deps) */
+/* ─────────────────────────────────────────────
+   Mini inline calendar
+───────────────────────────────────────────── */
 const MiniCalendar: React.FC<{ value: Date; onChange: (d: Date) => void; onClose: () => void }> = ({ value, onChange, onClose }) => {
   const [view, setView] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
-
   const year = view.getFullYear();
   const month = view.getMonth();
   const firstDow = new Date(year, month, 1).getDay();
@@ -88,12 +120,10 @@ const MiniCalendar: React.FC<{ value: Date; onChange: (d: Date) => void; onClose
     ...Array(firstDow).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
-  // pad to complete last row
   while (cells.length % 7 !== 0) cells.push(null);
 
   const isSelected = (d: number) =>
     value.getFullYear() === year && value.getMonth() === month && value.getDate() === d;
-
   const today = new Date();
   const isToday = (d: number) =>
     today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
@@ -104,7 +134,7 @@ const MiniCalendar: React.FC<{ value: Date; onChange: (d: Date) => void; onClose
         <button onClick={() => setView(new Date(year, month - 1, 1))} className="p-1 rounded hover:bg-muted">
           <ChevronLeft size={14} />
         </button>
-        <span className="text-sm font-semibold text-foreground">{MONTHS[month]} {year}</span>
+        <span className="text-sm font-semibold text-foreground">{MONTHS_ARR[month]} {year}</span>
         <button onClick={() => setView(new Date(year, month + 1, 1))} className="p-1 rounded hover:bg-muted">
           <ChevronRight size={14} />
         </button>
@@ -132,35 +162,16 @@ const MiniCalendar: React.FC<{ value: Date; onChange: (d: Date) => void; onClose
   );
 };
 
-const DueTodayPanel: React.FC = () => {
-  const { loans } = useLoans();
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [filter, setFilter] = useState<FilterType>('All');
-  const [calOpen, setCalOpen] = useState(false);
-  const calRef = useRef<HTMLDivElement>(null);
+/* ─────────────────────────────────────────────
+   Loan card shared between both views
+───────────────────────────────────────────── */
+interface LoanCardProps {
+  loan: Loan;
+  badge?: React.ReactNode;
+}
 
-  // Close calendar on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const dueLoans = useMemo(() => {
-    return loans.filter(loan => {
-      if (filter !== 'All' && loan.loanType !== filter) return false;
-      return isDueOn(loan, selectedDate);
-    });
-  }, [loans, selectedDate, filter]);
-
-  const filterButtons: FilterType[] = ['All', 'Finance', 'Tender', 'InterestRate'];
-
-  const formatDate = (d: Date) =>
-    d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-
-  const getLoanDueInfo = (loan: Loan) => {
+const LoanCard: React.FC<LoanCardProps> = ({ loan, badge }) => {
+  const getDueInfo = () => {
     if (loan.loanType === 'InterestRate') {
       const periodInterest = getInterestPerPeriod(loan);
       const pending = getPendingInterest(loan);
@@ -185,37 +196,135 @@ const DueTodayPanel: React.FC = () => {
     };
   };
 
-  return (
-    <div className="glass-card p-4 sm:p-6 space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Users size={20} className="text-primary" />
-          <h2 className="text-xl font-bold text-foreground tracking-tight">Due Payments</h2>
-        </div>
+  const info = getDueInfo();
 
-        {/* Date picker button */}
-        <div className="relative" ref={calRef}>
-          <button
-            onClick={() => setCalOpen(prev => !prev)}
-            className="flex items-center gap-2 px-3 py-2 border border-input rounded-xl bg-background text-sm font-medium hover:bg-muted transition-colors"
-          >
-            <CalendarIcon size={15} className="text-primary" />
-            {formatDate(selectedDate)}
-          </button>
-          {calOpen && (
-            <div className="absolute right-0 mt-1 z-50">
-              <MiniCalendar
-                value={selectedDate}
-                onChange={setSelectedDate}
-                onClose={() => setCalOpen(false)}
-              />
-            </div>
+  return (
+    <div className="flex items-start justify-between gap-3 p-3 rounded-xl border border-border bg-card hover:bg-muted/30 transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm text-foreground truncate">{sanitize(loan.customerName)}</span>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold ${BADGE_CLS[loan.loanType]}`}>
+            {TYPE_LABEL[loan.loanType]}
+          </span>
+          {badge}
+          {info.extra && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-destructive">
+              <AlertCircle size={10} /> {info.extra}
+            </span>
           )}
         </div>
+        <p className="text-xs text-muted-foreground mt-0.5">{sanitize(loan.phone)}</p>
+        {info.sub && <p className="text-xs text-muted-foreground">{info.sub}</p>}
+        <p className="text-xs text-muted-foreground mt-0.5">{info.label}</p>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0 text-sm font-bold text-primary">
+        <IndianRupee size={14} />
+        {info.dueAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+      </div>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────
+   Main panel
+───────────────────────────────────────────── */
+const DueTodayPanel: React.FC = () => {
+  const { loans } = useLoans();
+  const [mainTab, setMainTab] = useState<MainTab>('due');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [filter, setFilter] = useState<FilterType>('All');
+  const [calOpen, setCalOpen] = useState(false);
+  const calRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filterButtons: FilterType[] = ['All', 'Finance', 'Tender', 'InterestRate'];
+
+  /* Due-on-date list */
+  const dueLoans = useMemo(() =>
+    loans.filter(loan => {
+      if (filter !== 'All' && loan.loanType !== filter) return false;
+      return isDueOn(loan, selectedDate);
+    }), [loans, selectedDate, filter]);
+
+  /* Not-paying-3+ months list */
+  const notPayingLoans = useMemo(() =>
+    loans
+      .filter(loan => {
+        if (filter !== 'All' && loan.loanType !== filter) return false;
+        return getNotPayingMonths(loan) >= 3;
+      })
+      .map(loan => ({ loan, months: getNotPayingMonths(loan) }))
+      .sort((a, b) => b.months - a.months),
+    [loans, filter]);
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  return (
+    <div className="glass-card p-4 sm:p-6 space-y-4">
+      {/* ── Main tab row ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1 bg-secondary/60 rounded-xl p-1">
+          <button
+            onClick={() => setMainTab('due')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${
+              mainTab === 'due'
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <CalendarIcon size={14} />
+            Due Payments
+          </button>
+          <button
+            onClick={() => setMainTab('overdue')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${
+              mainTab === 'overdue'
+                ? 'bg-destructive/10 text-destructive shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Clock size={14} />
+            Not Paying
+            {notPayingLoans.length > 0 && (
+              <span className="ml-1 bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {notPayingLoans.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Date picker — only relevant for "due" tab */}
+        {mainTab === 'due' && (
+          <div className="relative" ref={calRef}>
+            <button
+              onClick={() => setCalOpen(prev => !prev)}
+              className="flex items-center gap-2 px-3 py-2 border border-input rounded-xl bg-background text-sm font-medium hover:bg-muted transition-colors"
+            >
+              <CalendarIcon size={15} className="text-primary" />
+              {formatDate(selectedDate)}
+            </button>
+            {calOpen && (
+              <div className="absolute right-0 mt-1 z-50">
+                <MiniCalendar
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  onClose={() => setCalOpen(false)}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Filter tabs */}
+      {/* ── Loan-type filter ── */}
       <div className="flex flex-wrap gap-1.5">
         {filterButtons.map(f => (
           <button
@@ -232,53 +341,54 @@ const DueTodayPanel: React.FC = () => {
         ))}
       </div>
 
-      {/* Results */}
-      {dueLoans.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
-          <CheckCircle2 size={36} className="text-muted-foreground/40" />
-          <p className="text-sm font-medium text-muted-foreground">
-            No payments due on {formatDate(selectedDate)}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground font-medium">
-            {dueLoans.length} customer{dueLoans.length !== 1 ? 's' : ''} have a payment due on{' '}
-            <span className="font-semibold text-foreground">{formatDate(selectedDate)}</span>
-          </p>
-          {dueLoans.map(loan => {
-            const info = getLoanDueInfo(loan);
-            return (
-              <div
+      {/* ── Due-on-date view ── */}
+      {mainTab === 'due' && (
+        dueLoans.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+            <CheckCircle2 size={36} className="text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">
+              No payments due on {formatDate(selectedDate)}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-medium">
+              {dueLoans.length} customer{dueLoans.length !== 1 ? 's' : ''} have a payment due on{' '}
+              <span className="font-semibold text-foreground">{formatDate(selectedDate)}</span>
+            </p>
+            {dueLoans.map(loan => <LoanCard key={loan.id} loan={loan} />)}
+          </div>
+        )
+      )}
+
+      {/* ── Not-paying-3+months view ── */}
+      {mainTab === 'overdue' && (
+        notPayingLoans.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+            <CheckCircle2 size={36} className="text-muted-foreground/40" />
+            <p className="text-sm font-medium text-muted-foreground">
+              All customers are paying on time 🎉
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-medium">
+              {notPayingLoans.length} customer{notPayingLoans.length !== 1 ? 's' : ''} have not paid for{' '}
+              <span className="font-semibold text-destructive">3+ months</span>
+            </p>
+            {notPayingLoans.map(({ loan, months }) => (
+              <LoanCard
                 key={loan.id}
-                className="flex items-start justify-between gap-3 p-3 rounded-xl border border-border bg-card hover:bg-muted/30 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-sm text-foreground truncate">
-                      {sanitize(loan.customerName)}
-                    </span>
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold ${BADGE_CLS[loan.loanType]}`}>
-                      {TYPE_LABEL[loan.loanType]}
-                    </span>
-                    {info.extra && (
-                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-destructive">
-                        <AlertCircle size={10} /> {info.extra}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{sanitize(loan.phone)}</p>
-                  {info.sub && <p className="text-xs text-muted-foreground">{info.sub}</p>}
-                  <p className="text-xs text-muted-foreground mt-0.5">{info.label}</p>
-                </div>
-                <div className="flex items-center gap-0.5 shrink-0 text-sm font-bold text-primary">
-                  <IndianRupee size={14} />
-                  {info.dueAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                loan={loan}
+                badge={
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-destructive/10 text-destructive">
+                    <Clock size={9} /> {months} month{months !== 1 ? 's' : ''} no payment
+                  </span>
+                }
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   );
